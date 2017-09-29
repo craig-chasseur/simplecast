@@ -1,0 +1,3 @@
+[submodule "pychromecast"]
+	path = pychromecast
+	url = git@github.com:balloob/pychromecast.git
