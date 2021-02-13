@@ -177,7 +177,8 @@ def GetCast(friendly_name):
   Raises:
     ValueError: No cast device with the specifed friendly name could be found.
   """
-  chromecasts = pychromecast.get_chromecasts()
+  chromecasts, browser = pychromecast.get_chromecasts()
+  pychromecast.discovery.stop_discovery(browser)
   for cast in chromecasts:
     if cast.device.friendly_name == friendly_name:
       return cast
