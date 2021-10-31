@@ -243,7 +243,8 @@ def main():
   cast.wait()
 
   callable_http_server = CallableHttpServer(args.port)
-  http_server_thread = threading.Thread(target=callable_http_server)
+  http_server_thread = threading.Thread(target=callable_http_server,
+                                        daemon=True)
   http_server_thread.start()
 
   # Sleep briefly while the server thread starts up.
