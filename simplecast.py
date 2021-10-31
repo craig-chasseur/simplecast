@@ -15,18 +15,21 @@ import time
 
 import pychromecast.pychromecast as pychromecast
 
+DEFAULT_SUBTITLES_MIME_TYPE = "text/vtt"
 FILE_COPY_BUFFER_SIZE = 64 * 1024
 
 
-# A global variable containing the path of the single file to be served via
-# HTTP.
-global_single_file = None
+# Global variables containing the paths of files to be served via HTTP.
+global_video_file = None
+global_subtitles_file = None
+global_subtitles_mime_type = DEFAULT_SUBTITLES_MIME_TYPE
 
 
 class CastHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
   """HTTP request handler for casting.
 
-  Supports range and cross-origin resource sharing (CORS).
+  Supports serving a single video file and an optional subtitles file. Supports
+  range and cross-origin resource sharing (CORS).
   """
 
   def do_HEAD(self):
@@ -56,12 +59,19 @@ class CastHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     Returns:
       file, an open file containing the content to serve.
     """
-    if self.path != "/file":
+    file_path = None
+    mime_type = None
+    if self.path == "/video":
+      file_path = global_video_file
+    elif self.path == "/subtitles":
+      file_path = global_subtitles_file
+      mime_type = global_subtitles_mime_type
+    else:
       self.send_error(404, "File not found")
       return None
 
     try:
-      f = open(global_single_file, 'rb')
+      f = open(file_path, 'rb')
     except OSError:
       self.send_error(404, "File not found")
       return None
@@ -69,9 +79,9 @@ class CastHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     try:
       file_stat = os.fstat(f.fileno())
       if self.range_start is None:
-        self._SendRegularHeaders(file_stat)
+        self._SendRegularHeaders(file_path, file_stat, mime_type)
       else:
-        self._SendRangeHeaders(file_stat)
+        self._SendRangeHeaders(file_path, file_stat, mime_type)
     except:
       f.close()
       raise
@@ -118,20 +128,22 @@ class CastHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
     else:
       return (int(match.group(1)), None)
 
-  def _SendRegularHeaders(self, file_stat):
+  def _SendRegularHeaders(self, file_path, file_stat, mime_type):
     """Sends headers for a regular (non-range) response."""
-    ctype = self.guess_type(global_single_file)
+    if not mime_type:
+      mime_type = self.guess_type(file_path)
     self.send_response(200)
-    self.send_header("Content-type", ctype)
-    self.send_header("Content-Length", str(file_stat[6]))
+    self.send_header("Content-type", mime_type)
+    self.send_header("Content-Length", str(file_stat.st_size))
     self.send_header("Last-Modified", self.date_time_string(file_stat.st_mtime))
     self.end_headers()
 
-  def _SendRangeHeaders(self, file_stat):
+  def _SendRangeHeaders(self, file_path, file_stat, mime_type):
     """Sends headers for a range response."""
-    ctype = self.guess_type(global_single_file)
+    if not mime_type:
+      mime_type = self.guess_type(file_path)
     self.send_response(206)
-    self.send_header("Content-type", ctype)
+    self.send_header("Content-type", mime_type)
     file_size = file_stat[6]
     if self.range_end is None or self.range_end >= file_size:
       self.range_end = file_size - 1
@@ -158,7 +170,8 @@ class CallableHttpServer(object):
 
   def __call__(self):
     """Starts HTTP server and runs indefinitely."""
-    httpd = http.server.HTTPServer(("", self._port), CastHTTPRequestHandler)
+    httpd = http.server.ThreadingHTTPServer(("", self._port),
+                                            CastHTTPRequestHandler)
     httpd.serve_forever()
 
 
@@ -195,7 +208,7 @@ def GetCast(friendly_name):
       [cc.device.friendly_name for cc in chromecasts]))
 
 
-def PlayMedia(port, media_controller, filename):
+def PlayMedia(port, media_controller, filename, has_subtitles):
   """Starts media playback on a cast device.
 
   HTTP server must be running when this function is called.
@@ -204,11 +217,16 @@ def PlayMedia(port, media_controller, filename):
     port: int, The port of the HTTP server on this machine.
     media_controller: pychromecast.MediaController, the media controller of the
         target cast device.
-    filename: The local filename to play.
+    filename: str, The local video filename to play.
+    has_subtitles: bool, Whether there is a subtitles track.
   """
-  type, _ = mimetypes.guess_type(filename)
-  url = "http://{}:{}/file".format(GetIp(), port)
-  media_controller.play_media(url, type)
+  videotype, _ = mimetypes.guess_type(filename)
+
+  ip = GetIp()
+  url = "http://{}:{}/video".format(ip, port)
+  suburl = "http://{}:{}/subtitles".format(ip, port) if has_subtitles else None
+  media_controller.play_media(url, videotype, subtitles=suburl,
+                              subtitles_mime=global_subtitles_mime_type)
   media_controller.block_until_active()
 
 
@@ -229,15 +247,26 @@ def main():
   """
   parser = argparse.ArgumentParser(description="Cast media.")
   parser.add_argument("--device", type=str,
-                      help="The name of the device to cast to.")
+                      help="The name of the device to cast to")
   parser.add_argument("--port", type=int, default=8080,
-                      help="The port to serve HTTP content on.")
+                      help="The port to serve HTTP content on")
+  parser.add_argument("--subtitles_file", type=str,
+                      help="Optional subtitles file")
+  parser.add_argument("--subtitles_mime_type", type=str,
+                      default=DEFAULT_SUBTITLES_MIME_TYPE,
+                      help="MIME type of subtitles")
   parser.add_argument("filename", metavar="FILENAME", type=str,
                       help="The file to cast")
   args = parser.parse_args()
 
-  global global_single_file
-  global_single_file = CanonicalizeFilePath(args.filename)
+  global global_video_file
+  global_video_file = CanonicalizeFilePath(args.filename)
+
+  global global_subtitles_file
+  global global_subtitles_mime_type
+  if args.subtitles_file:
+    global_subtitles_file = CanonicalizeFilePath(args.subtitles_file)
+    global_subtitles_mime_type = args.subtitles_mime_type
 
   cast, browser = GetCast(args.device)
   cast.wait()
@@ -250,7 +279,8 @@ def main():
   # Sleep briefly while the server thread starts up.
   time.sleep(2)
 
-  PlayMedia(args.port, cast.media_controller, args.filename)
+  PlayMedia(args.port, cast.media_controller, args.filename,
+            args.subtitles_file is not None)
 
   # Now that playback has started we can stop the browser.
   browser.stop_discovery()
