@@ -23,8 +23,10 @@ FILE_COPY_BUFFER_SIZE = 64 * 1024
 global_single_file = None
 
 
-class SingleFileHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
-  """HTTP request handler that only serves a single file and supports range.
+class CastHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
+  """HTTP request handler for casting.
+
+  Supports range and cross-origin resource sharing (CORS).
   """
 
   def do_HEAD(self):
@@ -92,6 +94,10 @@ class SingleFileHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
       outputfile.write(read_buffer)
       remaining -= len(read_buffer)
 
+  def end_headers(self):
+    self.send_header("Accept-Ranges", "bytes")
+    self.send_header("Access-Control-Allow-Origin", "*")
+    return super().end_headers()
 
   def _GetRange(self):
     """Parses the Range header from the request, if any.
@@ -139,7 +145,7 @@ class SingleFileHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
 
 
 class CallableHttpServer(object):
-  """Callable object that runs an HTTP server with SingleFileHTTPRequestHandler.
+  """Callable object that runs an HTTP server with CastHTTPRequestHandler.
   """
 
   def __init__(self, port):
@@ -152,8 +158,7 @@ class CallableHttpServer(object):
 
   def __call__(self):
     """Starts HTTP server and runs indefinitely."""
-    httpd = http.server.HTTPServer(("", self._port),
-                                   SingleFileHTTPRequestHandler)
+    httpd = http.server.HTTPServer(("", self._port), CastHTTPRequestHandler)
     httpd.serve_forever()
 
 
