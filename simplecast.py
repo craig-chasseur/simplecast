@@ -172,16 +172,17 @@ def GetCast(friendly_name):
     friendly_name: str, The friendly name of the cast device to look up.
 
   Returns:
-    pychromecast.Chromecast: Object representing the specified cast device.
+    Tuple[pychromecast.Chromecast, pychromecast.CastBrowser]: Object
+        representing the specified cast device and a service browser that keeps
+        ChromeCast mDNS data updated
 
   Raises:
     ValueError: No cast device with the specifed friendly name could be found.
   """
   chromecasts, browser = pychromecast.get_chromecasts()
-  pychromecast.discovery.stop_discovery(browser)
   for cast in chromecasts:
     if cast.device.friendly_name == friendly_name:
-      return cast
+      return (cast, browser)
   raise ValueError("Couldn't find device, options are: {}".format(
       [cc.device.friendly_name for cc in chromecasts]))
 
@@ -230,7 +231,7 @@ def main():
   global global_single_file
   global_single_file = CanonicalizeFilePath(args.filename)
 
-  cast = GetCast(args.device)
+  cast, browser = GetCast(args.device)
   cast.wait()
 
   callable_http_server = CallableHttpServer(args.port)
@@ -241,6 +242,10 @@ def main():
   time.sleep(2)
 
   PlayMedia(args.port, cast.media_controller, args.filename)
+
+  # Now that playback has started we can stop the browser.
+  browser.stop_discovery()
+
   # http_server_thread never actually terminates. For now this script has to be
   # killed.
   http_server_thread.join()
