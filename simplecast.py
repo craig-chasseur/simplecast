@@ -42,6 +42,9 @@ class SingleFileHTTPRequestHandler(http.server.SimpleHTTPRequestHandler):
           self.copyfile(f, self.wfile)
         else:
           self.copy_range(f, self.wfile)
+      except ConnectionResetError:
+        # ConnectionResetError is normal when ChromeCast stops or seeks.
+        pass
       finally:
         f.close()
 
